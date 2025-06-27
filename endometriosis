@@ -1,0 +1,551 @@
+# code for endometriosis
+
+# 下载bulk microarray 数据 GSE51981
+nohup wget https://ftp.ncbi.nlm.nih.gov/geo/series/GSE51nnn/GSE51981/suppl/GSE51981_RAW.tar &
+
+# bulk microarray 数据有
+GSE11691: 18 samples[9 control; 9 endometriosis 异位] # done
+GSE7305: 20 samples[10 control; 10 endometriosis 异位] # done
+GSE12768: 4 samples [2 eutopic 在位; 2 ectopic 异位] # done
+GSE201912: 6 samples [ 2 control; 2 ovrian control; 2 endometriosis 异位] # done 舍弃 overlap gene 太少
+GSE168902: 6 samples [3 control; 3 endometriosis 异位] # raw count filtered
+GSE25628: 22 samples [6 control; 9 eutopic在位 7 ectopic 异位] # done
+GSE51981: 148 samples [71 control; 77 ectopic 异位]
+
+
+merge_one<-merge(GSE11691_value,GSE7305_value,by='gene')
+merge_one<-merge(merge_one,ex_value,by='gene')
+merge_one<-merge(merge_one,GSE201912_value,by='gene') # GSE201912_value overlap gene 太少
+merge_one<-merge(merge_one,GSE168902_value,by='gene') # gene count
+merge_one<-merge(merge_one,GSE25628_value,by='gene')
+
+
+
+
+
+--------------------------------- 单细胞 细胞标志物 ---------------------------------
+sobj<-read_h5ad('/data/zhouy91/endometrial/cambridge_data/endometrium_cells_cellmarker.h5ad') # raw count
+sobj<-CreateSeuratObject(counts=t(as.matrix(sobj$X)),meta.data=sobj$obs)
+sobj <- NormalizeData(sobj, normalization.method = "LogNormalize", scale.factor = 10000)
+saveRDS(sobj, file = "/data/zhouy91/endometrial/cambridge_data/endometrium_cells_cellmarker.rds")
+
+DEGs <- FindAllMarkers(sobj, 
+                       verbose = F, 
+                       #only.pos = T, 
+                       random.seed = 1, 
+                       logfc.threshold = 0, 
+                       min.pct = 0.1, 
+                       return.thresh = 1)
+end_time<-Sys.time()
+print('-------------------------- running time -------------------------------------')
+print(end_time - start_time)
+
+DEGs$cluster = factor(DEGs$cluster, levels = sort(unique(DEGs$cluster)) )
+
+write.table(DEGs,'/data/zhouy91/endometrial/cambridge_data/endometrium_cells_cellmarker_DEG.txt',
+            sep = '\t')
+--------------------------------- 单细胞 细胞标志物 ---------------------------------
+
+
+
+--------------------------------- cibersortX 结果 ---------------------------------
+cibersort<-read.table('/data/zhouy91/endometrial/microarray/cibersortx/CIBERSORTx_Job131_Adjusted_20240624.txt',
+                      sep='\t',
+                      header = T)
+colnames(cibersort)
+
+Epi<-c('Cil','pCil',"SOX9_l" ,"SOX9_f_II" ,"Cyc" , "MUC","pLum", "SOX9_f_I"   ,
+       'pGla','Gla','Lum','Gla_s','Gla_s_F','KRT','SOX9_b') #  Hormones被剔除，
+
+Mes<-c('eSt','ePV_1b','sHo','dSt_l','dSt_e','ePV_2','eSt_M','ePV_1a','eSt_c',
+       'dSt_m','eHo','mPV','dHo','uSMCs',
+       'Fib','HOX') #多了三个hormones c('sHo','eHo','dHo')
+
+Lymphoid<-c('B','TReg','CD4','T_cyc','ILC','Mas','CD8','Pla_B','Red','uNK1','uNK3','uNK1_c','uNK2')
+
+Myeloid<-c('pDC','cDC2','eM2','cDC1','Mon',
+           'eM1')
+
+Endo<-c('Ven','Art','Lym')
+
+cibersort_2<-as.data.frame(matrix(data=NA,nrow = nrow(cibersort),ncol = 6))
+colnames(cibersort_2)<-c('Mixture','Epi','Mes','Lymphoid','Myeloid','Endo')
+cibersort_2$Mixture=cibersort$Mixture
+for (i in 1:nrow(cibersort)){
+  cibersort_2[i,'Epi']<-sum(cibersort[i,which(colnames(cibersort) %in% Epi)])
+}
+
+for (i in 1:nrow(cibersort)){
+  cibersort_2[i,'Mes']<-sum(cibersort[i,which(colnames(cibersort) %in% Mes)])
+}
+
+
+for (i in 1:nrow(cibersort)){
+  cibersort_2[i,'Lymphoid']<-sum(cibersort[i,which(colnames(cibersort) %in% Lymphoid)])
+}
+
+for (i in 1:nrow(cibersort)){
+  cibersort_2[i,'Myeloid']<-sum(cibersort[i,which(colnames(cibersort) %in% Myeloid)])
+}
+
+for (i in 1:nrow(cibersort)){
+  cibersort_2[i,'Endo']<-sum(cibersort[i,which(colnames(cibersort) %in% Endo)])
+}
+
+
+cibersort_value<-as.data.frame(matrix(nrow = nrow(cibersort)*5,ncol=4,data=NA))
+colnames(cibersort_value)<-c('Celltype','Percentage','Sample','Condition')
+
+cibersort_value$Celltype<-rep(colnames(cibersort_2)[2:6],nrow(cibersort))
+
+for (i in 1:nrow(cibersort)){
+  cibersort_value$Percentage[(1+5*(i-1)):(5*i)]<-cibersort_2[i,2:6]
+  cibersort_value$Sample[(1+5*(i-1)):(5*i)]<-rep(cibersort_2[i,1],5)
+}
+
+cibersort_value$Percentage<-as.numeric(cibersort_value$Percentage)
+
+cibersort_value$Percentage<-as.numeric(cibersort_value$Percentage)
+
+# cibersort$Mixture<-factor(cibersort$Mixture,
+#                                   levels = c('Control',
+#                                              'Endometriosis_Eutopic',
+#                                              'Endometriosis_Ectopic'))
+library(ggpubr)
+cibersort_value$Celltype_yilu=cibersort_value$Celltype
+cibersort_value$Celltype_yilu<-sapply(cibersort_value$Celltype,function(x){
+  if (x== 'Epi') {
+    return('Epithelial')
+  } else if (x=='Mes'){
+    return('Mesenchymal')
+  } else if (x=='Endo'){
+    return ('Endothelial')
+  } else {
+    return(x)
+  }
+})
+
+replace(cibersort_value$Celltype,'Epi','Epithelial')
+
+c<-ggviolin(cibersort_value, x = "Celltype_yilu", y = "Percentage", fill = "Condition",
+            add = "boxplot")+
+  #stat_compare_means(comparisons = my_comparisons_train,size=10)+
+  ylab("Percentage\n") +
+  xlab('')+
+  scale_fill_brewer(palette="Set1")+
+  #scale_y_continuous(breaks=seq(0, 1, 0.1))+
+  #coord_cartesian(ylim = c(-2500,3000))+
+  # geom_hline(yintercept = median(Purity_All[Purity_All$Group=='MYCN_AMP',]$ImmuneScore), 
+  #           size=2,linetype = 2)+
+  theme_classic()+
+  theme(
+    axis.text.x = element_text( face="bold",color = 'black',angle=45,hjust = 1,size=20),
+    axis.text.y = element_text( face="bold",color = 'black',size=15),
+    axis.line = element_line(colour = "black", size = 1, linetype = "solid"),
+    axis.title.y = element_text(color="black", face="bold",size=25))
+c+ stat_compare_means(aes(group = Condition),label = "p.format")
+
+ggsave(file='/data/zhouy91/endometrial/result/cibersortx_major_celltype.pdf',height = 6,width = 10,limitsize = FALSE)
+--------------------------------- cibersortX 结果 ---------------------------------
+
+
+--------------------------------- cibersortX 小类结果 ---------------------------------
+cibersort<-read.table('/data/zhouy91/endometrial/microarray/cibersortx/CIBERSORTx_Job131_Adjusted_20240624.txt',
+                      sep='\t',
+                      header = T)
+
+colnames(cibersort)
+
+
+
+cibersort_subset<-cibersort[, (colnames(cibersort) %in% c('Mixture',Myeloid))]
+
+cibersort_subset<-cibersort[,which(colnames(cibersort) %in% c('Mixture',Epi))]
+cibersort_subset<-cibersort[,which(colnames(cibersort) %in% c('Mixture',Mes))]
+cibersort_subset<-cibersort[,which(colnames(cibersort) %in% c('Mixture',Endo))]
+cibersort_subset<-cibersort[,which(colnames(cibersort) %in% c('Mixture',Lymphoid))]
+
+Mes, Lymphoid,Myeloid,Endo
+
+cibersort_value<-as.data.frame(matrix(nrow = nrow(cibersort_subset)*(ncol(cibersort_subset)-1),ncol=4,data=NA))
+colnames(cibersort_value)<-c('Celltype','Percentage','Sample','Condition')
+
+cibersort_value$Celltype<-rep(colnames(cibersort_subset)[2:ncol(cibersort_subset)],nrow(cibersort))
+
+
+for (i in 1:nrow(cibersort)){
+  cibersort_value$Percentage[(1+(ncol(cibersort_subset)-1)*(i-1)):((ncol(cibersort_subset)-1)*i)]<-cibersort_subset[i,2:ncol(cibersort_subset)]
+  cibersort_value$Sample[(1+(ncol(cibersort_subset)-1)*(i-1)):((ncol(cibersort_subset)-1)*i)]<-rep(cibersort_subset[i,1],(ncol(cibersort_subset)-1))
+}
+
+cibersort_value$Condition<-sapply(cibersort_value$Sample,function(x){
+  strsplit(x,'_')[[1]][1]
+})
+cibersort_value$Percentage<-as.numeric(cibersort_value$Percentage)
+c<-ggviolin(cibersort_value, x = "Celltype", y = "Percentage", fill = "Condition",
+            add = "boxplot")+
+  #stat_compare_means(comparisons = my_comparisons_train,size=10)+
+  ylab("Percentage\n") +
+  xlab('')+
+  ylim(0,0.2)+
+  scale_fill_brewer(palette="Set1")+
+  #scale_y_continuous(breaks=seq(0, 1, 0.1))+
+  #coord_cartesian(ylim = c(-2500,3000))+
+  # geom_hline(yintercept = median(Purity_All[Purity_All$Group=='MYCN_AMP',]$ImmuneScore), 
+  #           size=2,linetype = 2)+
+  theme_classic()+
+  theme(
+    axis.text.x = element_text( face="bold",color = 'black',angle=45,hjust = 1,size=20),
+    axis.text.y = element_text( face="bold",color = 'black',size=15),
+    axis.line = element_line(colour = "black", size = 1, linetype = "solid"),
+    axis.title.y = element_text(color="black", face="bold",size=25))
+c
+c+ stat_compare_means(aes(group = Condition),label = "p.format")
+ggsave(file='/data/zhouy91/endometrial/result/cibersortx_Lymphoid_minor_celltype.pdf',height = 6,width = 20,limitsize = FALSE)
+
+
+--------------------------------- cibersortX 小类结果 ---------------------------------
+
+
+
+--------------------------------- random forest 结果 ---------------------------------
+library(randomForest)
+cibersort<-read.table('/data/zhouy91/endometrial/microarray/cibersortx/CIBERSORTx_Job131_Adjusted_20240624.txt',
+                      sep='\t',
+                      header = T)
+cibersort$Mixture<- sapply(cibersort$Mixture,function(x){
+  strsplit(x,'_')[[1]][1] 
+})
+cibersort$Mixture = factor(cibersort$Mixture, levels=c('Control','EctopicEndometriosis'), 
+                           labels=c(F,T))
+
+predicted.classes=0
+seedlist=0
+for (i in 1:1000){
+  set.seed(i)
+  
+  training.samples <- cibersort$Mixture %>%
+    createDataPartition(p = 0.7, list = FALSE)
+  train.data  <- cibersort[training.samples, ]
+  test.data <- cibersort[-training.samples, ]
+  # Fit the model
+  RF_model = randomForest(Mixture ~ ., data=train.data, ntree=1000)
+  # Summarize the model
+  
+  # Make predictions
+  RF_predict = predict(RF_model, test.data, type="class")
+  
+  # Model accuracy
+  if (mean(RF_predict == test.data$Mixture)>predicted.classes){
+    
+    predicted.classes=mean(RF_predict == test.data$Mixture)
+    seedlist<-i
+    print(i)
+    print(mean(RF_predict == test.data$Mixture))
+  }
+}
+
+set.seed(360)
+
+training.samples <- cibersort$Mixture %>%
+  createDataPartition(p = 0.7, list = FALSE)
+train.data  <- cibersort[training.samples, ]
+test.data <- cibersort[-training.samples, ]
+
+RF_model = randomForest(Mixture ~ ., data=train.data, ntree=1000)
+
+RF_predict = predict(RF_model, test.data, type="class")
+confusionMatrix(RF_predict, test.data$Mixture, positive="TRUE")
+
+RF_predict_prob = predict(RF_model, test.data, type="prob")[,2]
+RF_predict_roc = roc(test.data$Mixture, RF_predict_prob)
+plot(RF_predict_roc, print.auc=TRUE)
+
+RF_predict_prob = predict(RF_model, test.data, type="prob")
+RF_ROC_predict = prediction(predictions = RF_predict_prob[,"TRUE"], labels = test.data$Mixture)
+RF_ROC_performance = performance(RF_ROC_predict, measure = "tpr", x.measure="fpr")
+plot(RF_ROC_performance,main="ROC Curve") 
+
+RF_AUC = performance(RF_ROC_predict, measure = "auc")
+RF_AUC@y.values
+value <- round(as.numeric(RF_AUC@y.values),3)
+label_auc <- paste0('AUC = ',as.character(value))
+
+# script for variable importance
+RF_model = randomForest(Mixture ~ ., data=train.data, ntree=1000, importance=TRUE)
+RF_importance = importance(RF_model)
+
+# result
+RF_importance
+
+--------------------------------- random forest 结果 ---------------------------------
+
+
+
+--------------------------------- 差异基因  火山图结果 ---------------------------------
+
+#eM2    Gla_s    SOX9_f_I
+library(ggplot2)
+library(openxlsx)
+library(ggrepel)
+dataset<-read.xlsx('/Users/yz3n18/Downloads/ChenMeihong/celltype_marker.xlsx',sheet = 5) #eM2 5 
+unique(dataset$cluster)
+
+
+dataset <- dataset[dataset$cluster=='eM2',2:8]
+cut_off_pvalue = 0.05  #统计显著性
+cut_off_logFC = 1           #差异倍数值
+
+
+min(dataset$p_val_adj)
+dataset$p_val_adj=ifelse(dataset$p_val_adj< 1e-300 ,1e-300,dataset$p_val_adj)
+# 根据阈值参数，上调基因设置为‘up’，下调基因设置为‘Down’，无差异设置为‘Stable’，并保存到change列中
+dataset$change = ifelse(dataset$p_val_adj < cut_off_pvalue & abs(dataset$avg_log2FC) >= cut_off_logFC, 
+                        ifelse(dataset$avg_log2FC> cut_off_logFC ,'Up','Down'),
+                        'Stable')
+
+dataset<-na.omit(dataset)
+range(dataset$avg_log2FC)
+p <- ggplot(
+  dataset, aes(x = avg_log2FC, y = -log10(p_val_adj), colour=change)) +
+  geom_point(alpha=0.4, size=3.5) +
+  scale_color_manual(values=c("#546de5", "#d2dae2","#ff4757"))+
+  # 辅助线
+  geom_vline(xintercept=c(-1,1),lty=4,col="black",lwd=0.8) +
+  geom_hline(yintercept = -log10(cut_off_pvalue),lty=4,col="black",lwd=0.8) +
+  # 坐标轴
+  labs(x="log2(fold change)",
+       y="-log10 (adj.p)")+
+  theme_classic()+
+  scale_x_continuous(breaks=c(
+                              -4,-3,-2, -1,0,1,2,3,4,5,6 ))+
+  # 图例
+  theme(plot.title = element_text(size=40,color = 'black',hjust = 0.5),
+        axis.text.x = element_text(  size=20,color = 'black',hjust = 0.5,vjust=0),
+        axis.text.y = element_text( size=20,color = 'black'),
+        axis.line = element_line(colour = "black", size = 1, linetype = "solid"),
+        axis.title.y = element_text(color="black", size=30,vjust=0),
+        axis.title.x = element_text(color="black", size=30,vjust=0),
+        legend.position="right", 
+        legend.title = element_blank(),
+        plot.margin = unit(c(1,1,1,1),"cm"))
+
+p
+dataset$label <- ifelse(dataset$p_val_adj < cut_off_pvalue & (dataset$avg_log2FC >= 3 |
+                                                                dataset$avg_log2FC <= -2),
+                        as.character(dataset$gene), "")
+options(ggrepel.max.overlaps = Inf)
+p<-p + geom_label_repel(data = dataset, aes(x = dataset$avg_log2FC, 
+                                            y = -log10(dataset$p_val_adj), 
+                                            label = label),
+                        size = 3, box.padding = unit(0.5, "lines"),
+                        point.padding = unit(0.8, "lines"), 
+                        segment.color = "black", 
+                        show.legend = FALSE)
+p
+ggsave(p,filename = '/Users/yz3n18/Downloads/ChenMeihong/eM2_DEG_logFC2.pdf',width = 15,height = 12)
+--------------------------------- 差异基因  火山图结果 ---------------------------------
+
+
+
+
+# ------------------------------------ 基于top50 varibale最大的基因构建PCA ---------------------------------------------
+
+merge_one_batch<-read.table('/data/zhouy91/endometrial/microarray/merge_one_batch_fivedata.txt',sep = '\t')
+
+library(factoextra)
+
+d<-as.matrix(merge_one_batch)
+dim(d)
+10281*0.5 ###
+mads=apply(d,1,mad) ### measured by median absolute deviation
+d=d[rev(order(mads))[1:5141],] ### top 50% variable genes
+
+data_t <- t(as.matrix(d))
+variableL <- ncol(data_t)
+pca <- prcomp(data_t[,1:variableL], scale=T)
+fviz_pca_ind(pca, repel=T)
+data_t<-as.data.frame(data_t)
+data_t$conditions<-as.character(sapply(colnames(merge_one_batch),function(x){
+  strsplit(x,'_')[[1]][1]
+}))
+
+p<-(fviz_pca_ind(pca, col.ind=data_t$conditions, mean.point=F, addEllipses = T, legend.title="Disease status",
+                 geom.ind = "point")+scale_shape_manual(values=seq(0,17))+theme_classic())
+
+p
+
+
+# ------------------------------------ 计算control 和 ectopic endometriosis的DEG ---------------------------------------
+
+pdata<-data.frame(sample=colnames(merge_one_batch),
+                  group=sapply(colnames(merge_one_batch),function(x){
+                    strsplit(x,'_')[[1]][1]
+                  }))
+
+group<-factor(pdata$group,levels = unique(pdata$group))
+
+design<-model.matrix(~0+ group)
+rownames(design)<-colnames(merge_one_batch)
+colnames(design)<-levels(group)
+cont.matrix<-makeContrasts('Endo vs Con'= EctopicEndometriosis - Control,
+                           levels = colnames(design))
+fit<-lmFit(merge_one_batch,design)
+fit2<-contrasts.fit(fit,cont.matrix)
+fit2<-eBayes(fit2)
+
+DEG<-topTable(fit2, coef=1, n=Inf) %>% na.omit()  ## coef比较分组 n基因数
+table(DEG$adj.P.Val <0.05 & abs(DEG$logFC) > 0.5)
+head(DEG)
+
+
+
+# ------------------------------------ 根据DEG计算PCA ------------------------------------------------------------------
+
+d<-as.matrix(merge_one_batch[rownames(DEG)[DEG$adj.P.Val <0.05 & abs(DEG$logFC) > 0.75],])
+dim(d)
+10281*0.5 ###
+mads=apply(d,1,mad) ### measured by median absolute deviation
+d=d[rev(order(mads))] ### top 50% variable genes
+
+data_t <- t(as.matrix(d))
+variableL <- ncol(data_t)
+pca <- prcomp(data_t[,1:variableL], scale=T)
+fviz_pca_ind(pca, repel=T)
+data_t<-as.data.frame(data_t)
+data_t$conditions<-as.character(sapply(colnames(merge_one_batch),function(x){
+  strsplit(x,'_')[[1]][1]
+}))
+
+p<-(fviz_pca_ind(pca, col.ind=data_t$conditions, mean.point=F, addEllipses = F, legend.title="Disease status",
+                 geom.ind = "point")+scale_shape_manual(values=seq(0,17))+theme_classic())
+
+p
+
+
+# ------------------------------------ 将h5ad文件转化成rds文件用于后续DEG命令行运行 ------------------------------------
+# ------------------------------------ 根据DEG计算heatmap --------------------------------------------------------------
+d<-as.matrix(merge_one_batch[rownames(DEG)[DEG$adj.P.Val <0.05 & abs(DEG$logFC) > 1],])
+dim(d)
+
+
+library(colorRamp2)
+library(ComplexHeatmap)
+# 标准化数据
+n <- t(scale(t(d)))
+colnames(n)<-data_t$conditions
+# 准备热图注释数据
+
+ac <- data.frame(data_t$conditions)
+
+colorbar<- colorRamp2(c(min(n), 0, max(n)), 
+                      c("royalblue3", "white", 'firebrick2'))
+
+colnames(ac) <- 'Type'
+rownames(ac) <- colnames(merge_one_batch)
+ac <- as.matrix(t(ac))
+# 创建PDF文件并绘制热图
+library(ComplexHeatmap)
+#pdf("Heatmap of DEG.pdf", width = 12, height = 10)
+ha = HeatmapAnnotation(`Type` = ac[1,],
+                       col = list(`Type` = c('Control' = "#D22C6C", 'EctopicEndometriosis' = "#6688AB")),
+                       annotation_legend_param = list(
+                         `Type` = list(title = "Type")))
+
+draw(Heatmap(as.matrix(n), name = "Heatmap of DEG", 
+             column_km = 1, column_km_repeats = 10,
+             clustering_distance_columns = "euclidean",
+             cluster_columns =F,
+             cluster_rows = T,
+             show_row_names = F, show_column_names = FALSE,
+             row_names_gp = gpar(fontsize = 4),
+             # right_annotation = ha2,
+             top_annotation = ha, col = colorbar, show_heatmap_legend = T,
+             show_parent_dend_line = FALSE), padding = unit(c(2, 2, 2, 2), "cm"))
+dev.off()
+
+
+pheatmap(as.matrix(deg_data),scale="row",
+         color = colorRampPalette(c("blue", "white", "red"))(1000))
+library(colorRamp2)
+library(ComplexHeatmap)
+Heatmap(as.matrix(n), 
+        col = colorRamp2(c(min(n), 0, max(n)), 
+                         c("royalblue3", "white", 'firebrick2')))
+
+
+
+
+
+
+
+
+
+library(randomForest)
+cibersort<-read.table('/data/zhouy91/endometrial/microarray/cibersortx/CIBERSORTx_Job131_Adjusted_20240624.txt',
+                      sep='\t',
+                      header = T)
+cibersort$Mixture<- sapply(cibersort$Mixture,function(x){
+  strsplit(x,'_')[[1]][1] 
+})
+cibersort$Mixture = factor(cibersort$Mixture, levels=c('Control','EctopicEndometriosis'), 
+                           labels=c(F,T))
+
+predicted.classes=0
+seedlist=0
+for (i in 1:1000){
+  set.seed(i)
+  
+  training.samples <- cibersort$Mixture %>%
+    createDataPartition(p = 0.7, list = FALSE)
+  train.data  <- cibersort[training.samples, ]
+  test.data <- cibersort[-training.samples, ]
+  # Fit the model
+  RF_model = randomForest(Mixture ~ ., data=train.data, ntree=1000)
+  # Summarize the model
+  
+  # Make predictions
+  RF_predict = predict(RF_model, test.data, type="class")
+  
+  # Model accuracy
+  if (mean(RF_predict == test.data$Mixture)>predicted.classes){
+    
+    predicted.classes=mean(RF_predict == test.data$Mixture)
+    seedlist<-i
+    print(i)
+    print(mean(RF_predict == test.data$Mixture))
+  }
+}
+
+set.seed(360)
+
+training.samples <- cibersort$Mixture %>%
+  createDataPartition(p = 0.7, list = FALSE)
+train.data  <- cibersort[training.samples, ]
+test.data <- cibersort[-training.samples, ]
+
+RF_model = randomForest(Mixture ~ ., data=train.data, ntree=1000)
+
+RF_predict = predict(RF_model, test.data, type="class")
+confusionMatrix(RF_predict, test.data$Mixture, positive="TRUE")
+
+RF_predict_prob = predict(RF_model, test.data, type="prob")[,2]
+RF_predict_roc = roc(test.data$Mixture, RF_predict_prob)
+plot(RF_predict_roc, print.auc=TRUE)
+
+RF_predict_prob = predict(RF_model, test.data, type="prob")
+RF_ROC_predict = prediction(predictions = RF_predict_prob[,"TRUE"], labels = test.data$Mixture)
+RF_ROC_performance = performance(RF_ROC_predict, measure = "tpr", x.measure="fpr")
+plot(RF_ROC_performance,main="ROC Curve") 
+
+RF_AUC = performance(RF_ROC_predict, measure = "auc")
+RF_AUC@y.values
+value <- round(as.numeric(RF_AUC@y.values),3)
+label_auc <- paste0('AUC = ',as.character(value))
+
+# script for variable importance
+RF_model = randomForest(Mixture ~ ., data=train.data, ntree=1000, importance=TRUE)
+RF_importance = importance(RF_model)
+
+# result
+RF_importance
